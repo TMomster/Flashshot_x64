@@ -20,6 +20,7 @@ private slots:
     void openSaveDir();
     void openLogDir();
     void runWizard();
+    void exportLog();
     void quitApp();
 
 private:
@@ -27,6 +28,7 @@ private:
     void applyConfig();
     void doScreenshot();
     void doReplayCapture();
+    void updateTrayTooltip();
 
     QSystemTrayIcon* m_trayIcon = nullptr;
     QAction* m_replayToggleAction = nullptr;
