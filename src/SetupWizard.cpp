@@ -16,11 +16,100 @@
 #include "ConfigManager.h"
 #include "NotificationManager.h"
 
+// 确认页面类，重写 initializePage 以动态显示配置摘要
+class ConfirmPage : public QWizardPage {
+public:
+    ConfirmPage(SetupWizard* wizard, QTextEdit* textEdit)
+        : m_wizard(wizard), m_textEdit(textEdit)
+    {
+        QVBoxLayout* layout = new QVBoxLayout(this);
+        layout->addWidget(m_textEdit);
+        layout->addStretch();
+        setTitle(tr("确认设置"));
+    }
+
+    void initializePage() override {
+        // 收集当前所有控件的值到临时配置
+        auto& temp = m_wizard->m_tempConfig;
+        temp["hotkey"] = m_wizard->m_hotkeyEdit->keySequence().toString(QKeySequence::NativeText);
+        temp["replay_hotkey"] = m_wizard->m_replayHotkeyEdit->keySequence().toString(QKeySequence::NativeText);
+        temp["save_dir"] = m_wizard->m_dirEdit->text();
+        QString quality = m_wizard->m_qualityCombo->currentText();
+        int qualityVal = (quality == tr("高") ? 2 : (quality == tr("中") ? 1 : 0));
+        temp["quality"] = qualityVal;
+        temp["replay_enabled"] = m_wizard->m_replayEnableCheck->isChecked();
+        temp["replay_duration"] = m_wizard->m_replayDurationSpin->value();
+        temp["replay_interval"] = m_wizard->m_replayIntervalSpin->value();
+        int scaleIdx = m_wizard->m_replayScaleCombo->currentIndex();
+        int scaleVal[] = {100, 75, 50, 25};
+        temp["replay_scale"] = scaleVal[scaleIdx];
+        temp["autostart"] = m_wizard->m_autostartCheck->isChecked();
+        temp["desktop_shortcut"] = m_wizard->m_desktopCheck->isChecked();
+        temp["notifications_enabled"] = m_wizard->m_notificationCheck->isChecked();
+        temp["sound_enabled"] = m_wizard->m_soundCheck->isChecked();
+        int durIdx = m_wizard->m_durationCombo->currentIndex();
+        int durMs[] = {500, 1000, 1500, 2000};
+        temp["notification_duration"] = durMs[durIdx];
+
+        QString html = QString(
+            "<b>普通截图快捷键:</b> %1<br>"
+            "<b>回放截屏快捷键:</b> %2<br>"
+            "<b>保存目录:</b> %3<br>"
+            "<b>图片质量:</b> %4<br>"
+            "<b>回放功能:</b> %5<br>"
+            "<b>回放时长/间隔/采样:</b> %6秒 / %7毫秒 / %8%%<br>"
+            "<b>开机自启动:</b> %9<br>"
+            "<b>桌面快捷方式:</b> %10<br>"
+            "<b>通知:</b> %11<br>"
+            "<b>通知时长:</b> %12秒<br>"
+            "<b>提示音:</b> %13"
+        ).arg(temp["hotkey"].toString(),
+              temp["replay_hotkey"].toString(),
+              temp["save_dir"].toString(),
+              m_wizard->m_qualityCombo->currentText(),
+              temp["replay_enabled"].toBool() ? tr("启用") : tr("禁用"),
+              QString::number(temp["replay_duration"].toInt()),
+              QString::number(temp["replay_interval"].toInt()),
+              QString::number(temp["replay_scale"].toInt()),
+              temp["autostart"].toBool() ? tr("是") : tr("否"),
+              temp["desktop_shortcut"].toBool() ? tr("是") : tr("否"),
+              temp["notifications_enabled"].toBool() ? tr("启用") : tr("禁用"),
+              QString::number(durMs[durIdx] / 1000.0, 'f', 1),
+              temp["sound_enabled"].toBool() ? tr("启用") : tr("禁用"));
+        m_textEdit->setHtml(html);
+    }
+
+private:
+    SetupWizard* m_wizard;
+    QTextEdit* m_textEdit;
+};
+
 SetupWizard::SetupWizard(QWidget *parent) : QWizard(parent)
 {
     setWindowTitle(tr("Flashshot 设置向导"));
     setWizardStyle(ModernStyle);
     initPages();
+
+    // 加载当前配置并预填充
+    auto& cfg = ConfigManager::instance();
+    m_hotkeyEdit->setKeySequence(QKeySequence(cfg.hotkey()));
+    m_replayHotkeyEdit->setKeySequence(QKeySequence(cfg.replayHotkey()));
+    m_dirEdit->setText(cfg.saveDir());
+    int quality = cfg.quality();
+    m_qualityCombo->setCurrentIndex(quality == 2 ? 0 : (quality == 1 ? 1 : 2)); // 高->0,中->1,低->2
+    m_replayEnableCheck->setChecked(cfg.replayEnabled());
+    m_replayDurationSpin->setValue(cfg.replayDuration());
+    m_replayIntervalSpin->setValue(cfg.replayInterval());
+    int scale = cfg.replayScale();
+    int scaleIdx = (scale == 100 ? 0 : (scale == 75 ? 1 : (scale == 50 ? 2 : 3)));
+    m_replayScaleCombo->setCurrentIndex(scaleIdx);
+    m_autostartCheck->setChecked(cfg.autostart());
+    m_desktopCheck->setChecked(cfg.desktopShortcut());
+    m_notificationCheck->setChecked(cfg.notificationsEnabled());
+    m_soundCheck->setChecked(cfg.soundEnabled());
+    int durMs = cfg.notificationDuration();
+    int durIdx = (durMs == 500 ? 0 : (durMs == 1000 ? 1 : (durMs == 1500 ? 2 : 3)));
+    m_durationCombo->setCurrentIndex(durIdx);
 }
 
 void SetupWizard::initPages()
@@ -192,63 +281,9 @@ QWizardPage* SetupWizard::createOtherPage()
 
 QWizardPage* SetupWizard::createConfirmPage()
 {
-    QWizardPage* page = new QWizardPage;
-    page->setTitle(tr("确认设置"));
-    QVBoxLayout* layout = new QVBoxLayout(page);
     QTextEdit* textEdit = new QTextEdit;
     textEdit->setReadOnly(true);
-    layout->addWidget(textEdit);
-    layout->addStretch();
-
-    connect(page, &QWizardPage::initializePage, [this, textEdit](){
-        m_tempConfig["hotkey"] = m_hotkeyEdit->keySequence().toString(QKeySequence::NativeText);
-        m_tempConfig["replay_hotkey"] = m_replayHotkeyEdit->keySequence().toString(QKeySequence::NativeText);
-        m_tempConfig["save_dir"] = m_dirEdit->text();
-        QString quality = m_qualityCombo->currentText();
-        int qualityVal = (quality == tr("高") ? 2 : (quality == tr("中") ? 1 : 0));
-        m_tempConfig["quality"] = qualityVal;
-        m_tempConfig["replay_enabled"] = m_replayEnableCheck->isChecked();
-        m_tempConfig["replay_duration"] = m_replayDurationSpin->value();
-        m_tempConfig["replay_interval"] = m_replayIntervalSpin->value();
-        int scaleIdx = m_replayScaleCombo->currentIndex();
-        int scaleVal[] = {100, 75, 50, 25};
-        m_tempConfig["replay_scale"] = scaleVal[scaleIdx];
-        m_tempConfig["autostart"] = m_autostartCheck->isChecked();
-        m_tempConfig["desktop_shortcut"] = m_desktopCheck->isChecked();
-        m_tempConfig["notifications_enabled"] = m_notificationCheck->isChecked();
-        m_tempConfig["sound_enabled"] = m_soundCheck->isChecked();
-        int durIdx = m_durationCombo->currentIndex();
-        int durMs[] = {500, 1000, 1500, 2000};
-        m_tempConfig["notification_duration"] = durMs[durIdx];
-
-        QString html = QString(
-            "<b>普通截图快捷键:</b> %1<br>"
-            "<b>回放截屏快捷键:</b> %2<br>"
-            "<b>保存目录:</b> %3<br>"
-            "<b>图片质量:</b> %4<br>"
-            "<b>回放功能:</b> %5<br>"
-            "<b>回放时长/间隔/采样:</b> %6秒 / %7毫秒 / %8%%<br>"
-            "<b>开机自启动:</b> %9<br>"
-            "<b>桌面快捷方式:</b> %10<br>"
-            "<b>通知:</b> %11<br>"
-            "<b>通知时长:</b> %12秒<br>"
-            "<b>提示音:</b> %13"
-        ).arg(m_tempConfig["hotkey"].toString(),
-              m_tempConfig["replay_hotkey"].toString(),
-              m_tempConfig["save_dir"].toString(),
-              m_qualityCombo->currentText(),
-              m_tempConfig["replay_enabled"].toBool() ? tr("启用") : tr("禁用"),
-              QString::number(m_tempConfig["replay_duration"].toInt()),
-              QString::number(m_tempConfig["replay_interval"].toInt()),
-              QString::number(m_tempConfig["replay_scale"].toInt()),
-              m_tempConfig["autostart"].toBool() ? tr("是") : tr("否"),
-              m_tempConfig["desktop_shortcut"].toBool() ? tr("是") : tr("否"),
-              m_tempConfig["notifications_enabled"].toBool() ? tr("启用") : tr("禁用"),
-              QString::number(durMs[durIdx] / 1000.0, 'f', 1),
-              m_tempConfig["sound_enabled"].toBool() ? tr("启用") : tr("禁用"));
-        textEdit->setHtml(html);
-    });
-    return page;
+    return new ConfirmPage(this, textEdit);
 }
 
 void SetupWizard::accept()
@@ -258,6 +293,7 @@ void SetupWizard::accept()
     cfg.setHotkey(m_tempConfig["hotkey"].toString());
     cfg.setReplayHotkey(m_tempConfig["replay_hotkey"].toString());
     cfg.setSaveDir(m_tempConfig["save_dir"].toString());
+    qDebug() << "Saving directory to config:" << m_tempConfig["save_dir"].toString();
     cfg.setQuality(m_tempConfig["quality"].toInt());
     cfg.setReplayEnabled(m_tempConfig["replay_enabled"].toBool());
     cfg.setReplayDuration(m_tempConfig["replay_duration"].toInt());
