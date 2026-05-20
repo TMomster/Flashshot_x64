@@ -7,18 +7,22 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
+# 设置 Qt 路径（请确认与您的安装一致）
 set(CMAKE_PREFIX_PATH "G:/Qt/6.11.0/mingw_64")
 
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Multimedia)
 
-# 如果使用 MinGW，编译 RC 文件并嵌入 manifest 和图标
+# 强制使用动态链接（默认已是，但显式声明更清晰）
+set(BUILD_SHARED_LIBS ON)
+
+# MinGW 特定：编译资源文件（嵌入清单和图标）
 if(MINGW)
     set(RC_FILE ${CMAKE_CURRENT_SOURCE_DIR}/src/resources.rc)
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/resources.o
         COMMAND windres ${RC_FILE} -o ${CMAKE_CURRENT_BINARY_DIR}/resources.o
         DEPENDS ${RC_FILE}
-        COMMENT "Compiling resources"
+        COMMENT "Compiling Windows resources"
     )
     set(EXTRA_OBJECTS ${CMAKE_CURRENT_BINARY_DIR}/resources.o)
 endif()
@@ -47,4 +51,5 @@ target_link_libraries(Flashshot_x64
     ole32
 )
 
+# 可选：安装规则
 install(TARGETS Flashshot_x64 RUNTIME DESTINATION bin)
