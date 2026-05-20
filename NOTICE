@@ -1,0 +1,16 @@
+Flashshot x64
+
+本软件使用 Qt 6 框架 (https://www.qt.io)，Qt 是 The Qt Company 及其贡献者的产品。
+Qt 根据 GNU Lesser General Public License (LGPL) 版本 3 授权。
+您有权获取、修改并重新分发 Qt 库的源代码，但必须同样遵循 LGPL 条款。
+
+Qt 库的源代码可以从以下地址获取：
+https://download.qt.io/official_releases/qt/6.11/6.11.0/single/
+
+本软件的其余部分（即 Flashshot 特有代码）采用专有许可证。
+具体条款请参阅 LICENSE 文件。
+
+本软件在运行时会加载 Qt 动态库，您可以通过替换符合 LGPL 要求的 Qt 库版本来
+获得与修改版 Qt 的链接能力。
+
+如果您对本软件的开源合规有任何疑问，请联系作者。
