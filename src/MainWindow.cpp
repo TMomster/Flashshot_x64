@@ -22,6 +22,11 @@
 #include <QDebug>
 #include <QApplication>
 #include <QClipboard>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QPushButton>
+#include <QTextBrowser>
+#include <windows.h>
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     // 窗口完全隐藏
@@ -80,6 +85,10 @@ void MainWindow::setupTray() {
     QAction* wizardAct = new QAction("重新设置向导", this);
     connect(wizardAct, &QAction::triggered, this, &MainWindow::runWizard);
     menu->addAction(wizardAct);
+    
+    QAction* aboutAct = new QAction("关于", this);
+    connect(aboutAct, &QAction::triggered, this, &MainWindow::showAboutDialog);
+    menu->addAction(aboutAct);
 
     QAction* quitAct = new QAction("退出", this);
     connect(quitAct, &QAction::triggered, this, &MainWindow::quitApp);
@@ -233,14 +242,70 @@ void MainWindow::runWizard() {
 
 void MainWindow::quitApp() {
     m_trayIcon->hide();
-    HotkeyManager::instance().stopHook();
-    ReplayBuffer::instance().stop();
-    QThreadPool::globalInstance()->waitForDone(1000);
-    QApplication::quit();
+    ::ExitProcess(0);
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
     event->ignore();
     hide();
     NotificationManager::instance().showMessage("程序已最小化到托盘");
+}
+
+void MainWindow::showAboutDialog() {
+    QString version = QCoreApplication::applicationVersion();
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("关于 Flashshot x64"));
+    dialog.setModal(true);
+    dialog.resize(600, 500);
+
+    QVBoxLayout* mainLayout = new QVBoxLayout(&dialog);
+
+    // 使用 QTextBrowser 支持链接点击
+    QTextBrowser* textBrowser = new QTextBrowser();
+    textBrowser->setReadOnly(true);
+    textBrowser->setFrameStyle(QFrame::NoFrame);
+    textBrowser->setStyleSheet("QTextBrowser { background-color: palette(window); }");
+    textBrowser->setOpenExternalLinks(true);
+
+    QString htmlContent = QString(
+        "<h3 style='text-align: center;'>Flashshot x64 %1</h3>"
+        "<p style='text-align: center;'>版权所有 (C) 2026 Momster</p>"
+        "<p style='text-align: center;'>截图工具，支持全局热键、回放缓冲区、自定义通知与剪贴板集成。</p>"
+        "<br>"
+        "<b>开源许可证</b><br>"
+        "本软件（Flashshot64 特有代码）采用 <b>GNU General Public License 版本 3</b> 授权。<br>"
+        "您可以在随附的 <tt>LICENSE</tt> 文件中查看完整条款。<br>"
+        "<br>"
+        "<b>第三方组件</b><br>"
+        "本软件使用了 Qt 6 框架，采用 <b>GNU Lesser General Public License 版本 3</b> 授权。<br>"
+        "Qt 是 The Qt Company 及其贡献者的注册商标。<br>"
+        "Qt 库的源代码可以从以下地址获取：<br>"
+        "<a href='https://download.qt.io/official_releases/qt/6.11/6.11.0/single/'>"
+        "https://download.qt.io/official_releases/qt/6.11/6.11.0/single/</a><br>"
+        "<br>"
+        "<b>隐私说明</b><br>"
+        "本软件不收集任何个人信息，所有数据仅保存在本地。<br>"
+        "详见随附的 <tt>PRIVACY.md</tt> 文件。<br>"
+        "<br>"
+        "对于商业授权（闭源使用）或问题反馈，请联系作者。<br>"
+        "联系方式见源代码文件头部的版权声明。"
+    ).arg(version);
+
+    textBrowser->setHtml(htmlContent);
+
+    mainLayout->addWidget(textBrowser);
+
+    QHBoxLayout* buttonLayout = new QHBoxLayout();
+    QPushButton* okButton = new QPushButton(tr("确定"));
+    connect(okButton, &QPushButton::clicked, &dialog, &QDialog::accept);
+    buttonLayout->addStretch();
+    buttonLayout->addWidget(okButton);
+    buttonLayout->addStretch();
+    mainLayout->addLayout(buttonLayout);
+
+    QRect screenGeometry = QGuiApplication::primaryScreen()->availableGeometry();
+    dialog.move(screenGeometry.center() - dialog.rect().center());
+
+    dialog.exec();
 }
