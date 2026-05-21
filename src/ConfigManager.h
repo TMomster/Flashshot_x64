@@ -10,18 +10,15 @@ class ConfigManager : public QObject {
     Q_OBJECT
 public:
     static ConfigManager& instance();
-
-    // 获取数据目录（%USERPROFILE%/MomsterTech/Flashshot_x64）
     static QString dataDir();
 
     void load();
     void save();
 
-    // Getter
     QString hotkey() const { return m_hotkey; }
     QString replayHotkey() const { return m_replayHotkey; }
     QString saveDir() const { return m_saveDir; }
-    int quality() const { return m_quality; }   // 0=低,1=中,2=高
+    int quality() const { return m_quality; }
     bool replayEnabled() const { return m_replayEnabled; }
     int replayDuration() const { return m_replayDuration; }
     int replayInterval() const { return m_replayInterval; }
@@ -32,7 +29,6 @@ public:
     bool soundEnabled() const { return m_soundEnabled; }
     int notificationDuration() const { return m_notificationDuration; }
 
-    // Setter (会调用 save 并执行实际动作)
     void setHotkey(const QString& key);
     void setReplayHotkey(const QString& key);
     void setSaveDir(const QString& dir);
@@ -56,7 +52,6 @@ private:
     ConfigManager(const ConfigManager&) = delete;
     ConfigManager& operator=(const ConfigManager&) = delete;
 
-    // 实际执行自启动/快捷方式操作的静态方法
     static void applyAutostart(bool enable);
     static void applyDesktopShortcut(bool enable);
 

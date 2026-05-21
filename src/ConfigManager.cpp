@@ -1,4 +1,5 @@
 #include "ConfigManager.h"
+#include "Logger.h"
 #include <QStandardPaths>
 #include <QCoreApplication>
 #include <QProcess>
@@ -6,7 +7,8 @@
 #include <QSettings>
 #include <QDebug>
 #include <QProcessEnvironment>
-#include <QDir> 
+#include <QDir>
+#include <QFileInfo>
 
 ConfigManager& ConfigManager::instance() {
     static ConfigManager mgr;
@@ -61,54 +63,95 @@ void ConfigManager::save() {
 }
 
 void ConfigManager::applyAutostart(bool enable) {
-    // 获取当前可执行文件的完整路径（自动适应任何安装位置）
-    QString appPath = QCoreApplication::applicationFilePath();
-    QString quotedPath = QString("\"%1\"").arg(appPath);
-    const QString regKeyName = "Flashshot_x64";        // 注册表项名称
-    const QString shortcutName = "Flashshot_x64.lnk";  // 快捷方式文件名
+    Logger::instance().log("INFO", QString("applyAutostart 被调用，enable=%1").arg(enable));
 
-    // 方法1: 当前用户注册表 (HKCU)
-    QSettings reg("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-                  QSettings::NativeFormat);
+    QString appPath = QCoreApplication::applicationFilePath();
+    QString taskName = "Flashshot_x64";
+    QString workingDir = QFileInfo(appPath).absolutePath();
+
     if (enable) {
-        reg.setValue(regKeyName, quotedPath);
-        // 验证是否写入成功
-        if (reg.value(regKeyName).toString() != quotedPath) {
-            qWarning() << "Failed to write autostart registry, trying startup folder";
-            // 方法2: 启动文件夹 (备选)
-            QString startupFolder = QProcessEnvironment::systemEnvironment().value("APPDATA")
-                                    + "/Microsoft/Windows/Start Menu/Programs/Startup";
-            QDir dir(startupFolder);
-            if (!dir.exists()) dir.mkpath(".");
-            QString shortcutPath = startupFolder + "/" + shortcutName;
-            QFile::remove(shortcutPath);  // 先删除旧链接
-            // 使用 PowerShell 创建快捷方式
-            QString psScript = QString(
-                "$WScriptShell = New-Object -ComObject WScript.Shell;"
-                "$Shortcut = $WScriptShell.CreateShortcut('%1');"
-                "$Shortcut.TargetPath = '%2';"
-                "$Shortcut.Save();"
-            ).arg(shortcutPath, appPath);
-            QProcess::execute("powershell", {"-Command", psScript});
-            if (QFile::exists(shortcutPath)) {
-                qDebug() << "Autostart shortcut created in startup folder:" << shortcutPath;
-            } else {
-                qWarning() << "Failed to create autostart shortcut";
-            }
-        } else {
-            qDebug() << "Autostart registry entry created successfully";
+        Logger::instance().log("INFO", "通过 PowerShell 创建计划任务（最高权限）...");
+        
+        // 使用 PowerShell 的 ScheduledTasks 模块创建任务，确保最高权限
+        QString psScript = QString(
+            "try { "
+            "    $Action = New-ScheduledTaskAction -Execute '%1' -WorkingDirectory '%2'; "
+            "    $Trigger = New-ScheduledTaskTrigger -AtLogOn -User '%3'; "
+            "    $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew; "
+            "    $Principal = New-ScheduledTaskPrincipal -UserId '%3' -LogonType Interactive -RunLevel Highest; "
+            "    Register-ScheduledTask -TaskName '%4' -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Force; "
+            "    Write-Host 'SUCCESS'; "
+            "} catch { "
+            "    Write-Host $_.Exception.Message; "
+            "}"
+        ).arg(appPath, workingDir, QProcessEnvironment::systemEnvironment().value("USERNAME"), taskName);
+        
+        QProcess process;
+        process.start("powershell", QStringList() << "-Command" << psScript);
+        process.waitForFinished(10000);
+        QString output = process.readAllStandardOutput();
+        QString error = process.readAllStandardError();
+        Logger::instance().log("INFO", "PowerShell 输出: " + output);
+        if (!error.isEmpty()) {
+            Logger::instance().log("ERROR", "PowerShell 错误: " + error);
         }
-    } else {
-        // 禁用自启动：删除注册表项
-        reg.remove(regKeyName);
-        // 同时删除启动文件夹中的快捷方式
+
+        // 检查任务是否创建成功
+        QProcess check;
+        check.start("schtasks", QStringList() << "/query" << "/tn" << taskName);
+        check.waitForFinished(2000);
+        if (check.exitCode() == 0) {
+            Logger::instance().log("INFO", "计划任务创建成功（最高权限已设置）");
+        } else {
+            Logger::instance().log("ERROR", "计划任务创建失败");
+        }
+
+        // 备选：启动文件夹快捷方式（确保自启动）
+        Logger::instance().log("INFO", "创建启动文件夹快捷方式作为备用...");
         QString startupFolder = QProcessEnvironment::systemEnvironment().value("APPDATA")
                                 + "/Microsoft/Windows/Start Menu/Programs/Startup";
-        QString shortcutPath = startupFolder + "/" + shortcutName;
+        QDir().mkpath(startupFolder);
+        QString shortcutPath = startupFolder + "/Flashshot_x64.lnk";
+        QString psShortcut = QString(
+            "$WScriptShell = New-Object -ComObject WScript.Shell;"
+            "$Shortcut = $WScriptShell.CreateShortcut('%1');"
+            "$Shortcut.TargetPath = '%2';"
+            "$Shortcut.WorkingDirectory = '%3';"
+            "$Shortcut.Save();"
+        ).arg(shortcutPath, appPath, workingDir);
+        QProcess::execute("powershell", {"-Command", psShortcut});
+        if (QFile::exists(shortcutPath)) {
+            Logger::instance().log("INFO", "启动文件夹快捷方式已创建: " + shortcutPath);
+        } else {
+            Logger::instance().log("WARNING", "创建启动文件夹快捷方式失败");
+        }
+
+        // 清理旧注册表项
+        QSettings reg("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                      QSettings::NativeFormat);
+        reg.remove("Flashshot_x64");
+        Logger::instance().log("INFO", "开机自启动已启用（任务计划 + 快捷方式）");
+    } else {
+        // 禁用自启动：删除任务计划和启动文件夹快捷方式
+        Logger::instance().log("INFO", "删除计划任务...");
+        QProcess process;
+        process.start("schtasks", QStringList() << "/delete" << "/tn" << taskName << "/f");
+        process.waitForFinished(3000);
+        QString output = process.readAllStandardOutput();
+        QString error = process.readAllStandardError();
+        Logger::instance().log("INFO", "schtasks 删除输出: " + output);
+        if (!error.isEmpty()) {
+            Logger::instance().log("ERROR", "schtasks 删除错误: " + error);
+        }
+
+        QString startupFolder = QProcessEnvironment::systemEnvironment().value("APPDATA")
+                                + "/Microsoft/Windows/Start Menu/Programs/Startup";
+        QString shortcutPath = startupFolder + "/Flashshot_x64.lnk";
         if (QFile::exists(shortcutPath)) {
             QFile::remove(shortcutPath);
+            Logger::instance().log("INFO", "启动文件夹快捷方式已删除");
         }
-        qDebug() << "Autostart disabled";
+        Logger::instance().log("INFO", "开机自启动已禁用");
     }
 }
 
