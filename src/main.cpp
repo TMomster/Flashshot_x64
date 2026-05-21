@@ -6,15 +6,17 @@
 #include <QSystemTrayIcon>
 #include <QIcon>
 #include <QDir>
-#include <QThreadPool>  // 新增
 #include <signal.h>
+#include <QThreadPool>
 #include "MainWindow.h"
 #include "ConfigManager.h"
 #include "HotkeyManager.h"
 #include "ReplayBuffer.h"
 #include "Logger.h"
+#include "NotificationManager.h"
 
 static const QString APP_ID = "Flashshot_Singleton_2026";
+static QLocalServer* g_server = nullptr;
 
 // 信号处理函数（用于捕获崩溃）
 void signalHandler(int sig) {
@@ -41,66 +43,72 @@ void messageHandler(QtMsgType type, const QMessageLogContext& context, const QSt
     }
 }
 
-bool tryAcquireSingleton() {
+// 检测是否已有实例在运行
+bool isAlreadyRunning() {
+    QLocalSocket socket;
+    socket.connectToServer(APP_ID);
+    return socket.waitForConnected(500);
+}
+
+// 向已运行的实例发送命令
+void sendCommandToRunningInstance(const QString& cmd) {
     QLocalSocket socket;
     socket.connectToServer(APP_ID);
     if (socket.waitForConnected(500)) {
-        socket.close();
-        return false;
+        socket.write(cmd.toUtf8());
+        socket.flush();
+        socket.waitForBytesWritten(500);
+        socket.disconnectFromServer();
     }
-    QLocalServer *server = new QLocalServer();
-    QObject::connect(server, &QLocalServer::newConnection, [server](){
-        QLocalSocket *client = server->nextPendingConnection();
-        client->write("already_running");
-        client->flush();
+}
+
+// 创建本地服务器，用于接收后续启动实例的命令
+void createServer() {
+    g_server = new QLocalServer();
+    QObject::connect(g_server, &QLocalServer::newConnection, [](){
+        QLocalSocket* client = g_server->nextPendingConnection();
+        if (client->waitForReadyRead(500)) {
+            QByteArray data = client->readAll();
+            if (data.startsWith("notify:")) {
+                QString msg = QString::fromUtf8(data.mid(7));
+                // 确保在主线程中调用通知
+                QMetaObject::invokeMethod(qApp, [msg]() {
+                    NotificationManager::instance().showMessage(msg);
+                }, Qt::QueuedConnection);
+            }
+        }
         client->disconnectFromServer();
         delete client;
     });
-    if (!server->listen(APP_ID)) {
-        if (server->serverError() == QAbstractSocket::AddressInUseError) {
+    if (!g_server->listen(APP_ID)) {
+        if (g_server->serverError() == QAbstractSocket::AddressInUseError) {
             QLocalServer::removeServer(APP_ID);
-            server->listen(APP_ID);
-        } else {
-            delete server;
-            return false;
+            g_server->listen(APP_ID);
         }
     }
-    return true;
 }
 
 int main(int argc, char *argv[]) {
-    // 安装日志消息处理器
+    // 安装日志和信号处理器
     qInstallMessageHandler(messageHandler);
-
-    // 安装信号处理器 (用于捕获崩溃)
     signal(SIGSEGV, signalHandler);
     signal(SIGABRT, signalHandler);
     signal(SIGFPE, signalHandler);
     signal(SIGILL, signalHandler);
 
-    if (!tryAcquireSingleton()) {
-        QApplication app(argc, argv);
-        QSystemTrayIcon tray;
-        QIcon icon = QIcon::fromTheme("camera-photo");
-        if (icon.isNull()) icon = QIcon(":/resources/Flashshot.png");
-        tray.setIcon(icon);
-        tray.show();
-        tray.showMessage("Flashshot", "程序已在运行中", QSystemTrayIcon::Information, 1500);
-        QTimer::singleShot(2000, &app, &QApplication::quit);
-        return app.exec();
+    // 检测是否已有实例运行
+    if (isAlreadyRunning()) {
+        // 已有实例，发送通知命令并退出
+        sendCommandToRunningInstance("notify:程序已在运行中");
+        return 0;
     }
 
+    // 正常启动程序
     QApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(false);
     app.setApplicationName("Flashshot");
-    app.setApplicationVersion("2.4.1");
+    app.setApplicationVersion("1.0.0");
     app.setOrganizationName("MomsterTech");
-
-    // 设置应用程序图标（运行时窗口图标，可选）
-    QIcon appIcon(":/resources/Flashshot.ico");
-    if (!appIcon.isNull()) {
-        app.setWindowIcon(appIcon);
-    }
 
     Logger::instance().log("INFO", "Program started");
 
@@ -108,8 +116,6 @@ int main(int argc, char *argv[]) {
     QString dataDir = ConfigManager::dataDir();
     QDir().mkpath(dataDir);
     QDir().mkpath(dataDir + "/logs");
-
-    // 清理超过24小时的旧日志文件
     Logger::cleanOldLogs(24);
 
     // 加载配置
@@ -122,22 +128,30 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    // 创建本地服务器，用于接收后续启动的命令
+    createServer();
+
+    // 创建主窗口（隐藏）
     MainWindow w;
     w.setWindowFlag(Qt::Window, false);
     w.setParent(nullptr);
     w.hide();
 
+    // 退出时清理资源
     QObject::connect(&app, &QApplication::aboutToQuit, [](){
         Logger::instance().log("INFO", "Program exiting");
         Logger::instance().flushToFile("shutdown");
         HotkeyManager::instance().stopHook();
         ReplayBuffer::instance().stop();
+        if (g_server) {
+            g_server->close();
+            delete g_server;
+            g_server = nullptr;
+        }
         QThreadPool::globalInstance()->waitForDone(1000);
     });
 
     int ret = app.exec();
-
     Logger::instance().flushToFile("normal_exit");
-
     return ret;
 }
