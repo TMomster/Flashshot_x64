@@ -17,12 +17,13 @@ private slots:
     void onHotkeyTriggered(const QString& id);
     void onTrayActivated(QSystemTrayIcon::ActivationReason reason);
     void toggleReplay();
+    void toggleAutostart();                     // 新增：切换开机自启动
     void openSaveDir();
     void openLogDir();
     void runWizard();
     void exportLog();
     void quitApp();
-    void showAboutDialog(); 
+    void showAboutDialog();
 
 private:
     void setupTray();
@@ -33,6 +34,7 @@ private:
 
     QSystemTrayIcon* m_trayIcon = nullptr;
     QAction* m_replayToggleAction = nullptr;
+    QAction* m_autostartToggleAction = nullptr; // 新增：开机自启动菜单项
     bool m_replayEnabled = false;
 };
 
