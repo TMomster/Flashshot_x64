@@ -22,6 +22,7 @@ private slots:
     void runWizard();
     void exportLog();
     void quitApp();
+    void showAboutDialog(); 
 
 private:
     void setupTray();
