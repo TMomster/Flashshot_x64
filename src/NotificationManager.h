@@ -6,6 +6,7 @@
 #include <QTimer>
 #include <QMediaPlayer>
 #include <QPointer>
+#include <QLabel>
 
 class NotificationManager : public QObject {
     Q_OBJECT
@@ -21,6 +22,7 @@ private:
     QPointer<QWidget> m_window;
     QTimer m_hideTimer;
     QMediaPlayer* m_player = nullptr;
+    QLabel* m_contentLabel = nullptr; 
     bool m_enabled = true;
     int m_duration = 1000;
     bool m_sound = true;
