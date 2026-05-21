@@ -159,5 +159,7 @@ void HotkeyManager::stopHook() {
         m_hook = nullptr;
     }
     m_running = false;
+    // 清除所有热键，避免残留引用
+    m_hotkeys.clear();
     qDebug() << "Keyboard hook stopped.";
 }
