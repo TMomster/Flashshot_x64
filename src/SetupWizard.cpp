@@ -1,4 +1,7 @@
 #include "SetupWizard.h"
+#include "ConfigManager.h"
+#include "NotificationManager.h"
+
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -13,8 +16,8 @@
 #include <QPushButton>
 #include <QDir>
 #include <QStandardPaths>
-#include "ConfigManager.h"
-#include "NotificationManager.h"
+#include <QGuiApplication>
+#include <QScreen>
 
 // 确认页面类，重写 initializePage 以动态显示配置摘要
 class ConfirmPage : public QWizardPage {
@@ -87,7 +90,11 @@ private:
 SetupWizard::SetupWizard(QWidget *parent) : QWizard(parent)
 {
     setWindowTitle(tr("Flashshot 设置向导"));
-    setWizardStyle(ModernStyle);
+    setWizardStyle(ClassicStyle);   // 经典风格，不显示侧边栏
+    setOption(HaveHelpButton, false);
+    setMinimumSize(600, 500);
+    resize(640, 520);
+
     initPages();
 
     // 加载当前配置并预填充
@@ -96,7 +103,7 @@ SetupWizard::SetupWizard(QWidget *parent) : QWizard(parent)
     m_replayHotkeyEdit->setKeySequence(QKeySequence(cfg.replayHotkey()));
     m_dirEdit->setText(cfg.saveDir());
     int quality = cfg.quality();
-    m_qualityCombo->setCurrentIndex(quality == 2 ? 0 : (quality == 1 ? 1 : 2)); // 高->0,中->1,低->2
+    m_qualityCombo->setCurrentIndex(quality == 2 ? 0 : (quality == 1 ? 1 : 2));
     m_replayEnableCheck->setChecked(cfg.replayEnabled());
     m_replayDurationSpin->setValue(cfg.replayDuration());
     m_replayIntervalSpin->setValue(cfg.replayInterval());
@@ -110,6 +117,10 @@ SetupWizard::SetupWizard(QWidget *parent) : QWizard(parent)
     int durMs = cfg.notificationDuration();
     int durIdx = (durMs == 500 ? 0 : (durMs == 1000 ? 1 : (durMs == 1500 ? 2 : 3)));
     m_durationCombo->setCurrentIndex(durIdx);
+
+    // 将窗口居中于主屏幕
+    QRect screenGeometry = QGuiApplication::primaryScreen()->availableGeometry();
+    move(screenGeometry.center() - rect().center());
 }
 
 void SetupWizard::initPages()
