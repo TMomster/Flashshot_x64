@@ -2,12 +2,11 @@
 #include "ConfigManager.h"
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QDateTime>
 #include <QTextStream>
 #include <QCoreApplication>
 #include <QDebug>
-#include <QDir>
-#include <QFileInfo>
-#include <QDateTime>
 
 Logger& Logger::instance() {
     static Logger logger;
@@ -15,7 +14,6 @@ Logger& Logger::instance() {
 }
 
 Logger::Logger() {
-    // ‘§∑÷≈‰£¨±‹√‚∆µ∑±÷ÿ–¬∑÷≈‰
     m_buffer.reserve(MAX_BUFFER_SIZE);
 }
 
@@ -53,6 +51,7 @@ void Logger::flushToFile(const QString& reason) {
     }
 
     QTextStream out(&file);
+    out.setEncoding(QStringConverter::Utf8);
     out << "=== Flashshot Log ===\n";
     out << "Version: " << QCoreApplication::applicationVersion() << "\n";
     out << "Time: " << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") << "\n";
@@ -79,8 +78,7 @@ QStringList Logger::getRecentLogs(int count) const {
     return m_buffer.mid(m_buffer.size() - count);
 }
 
-void Logger::cleanOldLogs(int hours)
-{
+void Logger::cleanOldLogs(int hours) {
     QString logDir = ConfigManager::dataDir() + "/logs";
     QDir dir(logDir);
     if (!dir.exists()) return;
