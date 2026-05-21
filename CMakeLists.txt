@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Flashshot VERSION 2.4.1 LANGUAGES CXX)
+project(Flashshot VERSION 1.0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,15 +7,15 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-# 设置 Qt 路径（请确认与您的安装一致）
-set(CMAKE_PREFIX_PATH "G:/Qt/6.11.0/mingw_64")
-
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Multimedia)
-
-# 强制使用动态链接（默认已是，但显式声明更清晰）
+# 强制使用动态链接
 set(BUILD_SHARED_LIBS ON)
 
-# MinGW 特定：编译资源文件（嵌入清单和图标）
+# 设置 Qt 路径（请修改为您的实际路径）
+set(CMAKE_PREFIX_PATH "G:/Qt/6.11.0/mingw_64")
+
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Multimedia Concurrent)
+
+# MinGW 特定：编译资源文件（嵌入管理员清单和程序图标）
 if(MINGW)
     set(RC_FILE ${CMAKE_CURRENT_SOURCE_DIR}/src/resources.rc)
     add_custom_command(
@@ -45,11 +45,11 @@ target_link_libraries(Flashshot_x64
     Qt6::Widgets
     Qt6::Gui
     Qt6::Multimedia
+    Qt6::Concurrent
     user32
     gdi32
     shell32
     ole32
 )
 
-# 可选：安装规则
 install(TARGETS Flashshot_x64 RUNTIME DESTINATION bin)
