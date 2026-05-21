@@ -14,8 +14,6 @@ public:
     void log(const QString& level, const QString& msg);
     void flushToFile(const QString& reason = QString());
     QStringList getRecentLogs(int count = 500) const;
-
-    // 清理旧日志文件（保留最近 hours 小时内的文件，默认24小时）
     static void cleanOldLogs(int hours = 24);
 
 private:
