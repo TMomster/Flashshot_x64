@@ -5,6 +5,8 @@
 #include <QFile>
 #include <QSettings>
 #include <QDebug>
+#include <QProcessEnvironment>
+#include <QDir> 
 
 ConfigManager& ConfigManager::instance() {
     static ConfigManager mgr;
@@ -59,12 +61,54 @@ void ConfigManager::save() {
 }
 
 void ConfigManager::applyAutostart(bool enable) {
+    // 获取当前可执行文件的完整路径（自动适应任何安装位置）
+    QString appPath = QCoreApplication::applicationFilePath();
+    QString quotedPath = QString("\"%1\"").arg(appPath);
+    const QString regKeyName = "Flashshot_x64";        // 注册表项名称
+    const QString shortcutName = "Flashshot_x64.lnk";  // 快捷方式文件名
+
+    // 方法1: 当前用户注册表 (HKCU)
     QSettings reg("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
                   QSettings::NativeFormat);
     if (enable) {
-        reg.setValue("Flashshot", QCoreApplication::applicationFilePath());
+        reg.setValue(regKeyName, quotedPath);
+        // 验证是否写入成功
+        if (reg.value(regKeyName).toString() != quotedPath) {
+            qWarning() << "Failed to write autostart registry, trying startup folder";
+            // 方法2: 启动文件夹 (备选)
+            QString startupFolder = QProcessEnvironment::systemEnvironment().value("APPDATA")
+                                    + "/Microsoft/Windows/Start Menu/Programs/Startup";
+            QDir dir(startupFolder);
+            if (!dir.exists()) dir.mkpath(".");
+            QString shortcutPath = startupFolder + "/" + shortcutName;
+            QFile::remove(shortcutPath);  // 先删除旧链接
+            // 使用 PowerShell 创建快捷方式
+            QString psScript = QString(
+                "$WScriptShell = New-Object -ComObject WScript.Shell;"
+                "$Shortcut = $WScriptShell.CreateShortcut('%1');"
+                "$Shortcut.TargetPath = '%2';"
+                "$Shortcut.Save();"
+            ).arg(shortcutPath, appPath);
+            QProcess::execute("powershell", {"-Command", psScript});
+            if (QFile::exists(shortcutPath)) {
+                qDebug() << "Autostart shortcut created in startup folder:" << shortcutPath;
+            } else {
+                qWarning() << "Failed to create autostart shortcut";
+            }
+        } else {
+            qDebug() << "Autostart registry entry created successfully";
+        }
     } else {
-        reg.remove("Flashshot");
+        // 禁用自启动：删除注册表项
+        reg.remove(regKeyName);
+        // 同时删除启动文件夹中的快捷方式
+        QString startupFolder = QProcessEnvironment::systemEnvironment().value("APPDATA")
+                                + "/Microsoft/Windows/Start Menu/Programs/Startup";
+        QString shortcutPath = startupFolder + "/" + shortcutName;
+        if (QFile::exists(shortcutPath)) {
+            QFile::remove(shortcutPath);
+        }
+        qDebug() << "Autostart disabled";
     }
 }
 
