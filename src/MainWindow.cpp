@@ -26,10 +26,11 @@
 #include <QHBoxLayout>
 #include <QPushButton>
 #include <QTextBrowser>
+#include <QtConcurrent>
+#include <QFutureWatcher>
 #include <windows.h>
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
-    // 窗口完全隐藏
     setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
     setAttribute(Qt::WA_TranslucentBackground);
     resize(1, 1);
@@ -41,7 +42,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
             this, &MainWindow::onHotkeyTriggered);
     connect(&ConfigManager::instance(), &ConfigManager::configChanged,
             this, &MainWindow::applyConfig);
-    NotificationManager::instance().showMessage("Flashshot 已启动");
+    NotificationManager::instance().showMessage("Flashshot x64 已启动");
 }
 
 MainWindow::~MainWindow() {
@@ -59,37 +60,52 @@ void MainWindow::setupTray() {
         icon = QIcon::fromTheme("camera-photo");
     }
     m_trayIcon->setIcon(icon);
-    m_trayIcon->setToolTip("Flashshot x64 运行中");  // 临时，稍后更新
+    m_trayIcon->setToolTip("Flashshot x64 运行中");
 
     QMenu* menu = new QMenu(this);
 
+    // 回放功能开关
     m_replayToggleAction = new QAction("回放功能: 关闭", this);
     connect(m_replayToggleAction, &QAction::triggered, this, &MainWindow::toggleReplay);
     menu->addAction(m_replayToggleAction);
+
+    // 开机自启动开关
+    auto& cfg = ConfigManager::instance();
+    bool autostartEnabled = cfg.autostart();
+    m_autostartToggleAction = new QAction(autostartEnabled ? "开机自启动: 开" : "开机自启动: 关", this);
+    connect(m_autostartToggleAction, &QAction::triggered, this, &MainWindow::toggleAutostart);
+    menu->addAction(m_autostartToggleAction);
+
     menu->addSeparator();
 
+    // 打开截图保存目录
     QAction* openDirAct = new QAction("打开截图保存目录", this);
     connect(openDirAct, &QAction::triggered, this, &MainWindow::openSaveDir);
     menu->addAction(openDirAct);
 
+    // 打开日志目录
     QAction* openLogAct = new QAction("打开日志目录", this);
     connect(openLogAct, &QAction::triggered, this, &MainWindow::openLogDir);
     menu->addAction(openLogAct);
 
+    // 导出日志
     QAction* exportLogAct = new QAction("导出日志", this);
     connect(exportLogAct, &QAction::triggered, this, &MainWindow::exportLog);
     menu->addAction(exportLogAct);
 
     menu->addSeparator();
 
+    // 重新设置向导
     QAction* wizardAct = new QAction("重新设置向导", this);
     connect(wizardAct, &QAction::triggered, this, &MainWindow::runWizard);
     menu->addAction(wizardAct);
-    
+
+    // 关于
     QAction* aboutAct = new QAction("关于", this);
     connect(aboutAct, &QAction::triggered, this, &MainWindow::showAboutDialog);
     menu->addAction(aboutAct);
 
+    // 退出
     QAction* quitAct = new QAction("退出", this);
     connect(quitAct, &QAction::triggered, this, &MainWindow::quitApp);
     menu->addAction(quitAct);
@@ -99,7 +115,6 @@ void MainWindow::setupTray() {
 
     connect(m_trayIcon, &QSystemTrayIcon::activated, this, &MainWindow::onTrayActivated);
 
-    // 初始化完整的提示文本
     updateTrayTooltip();
 }
 
@@ -113,13 +128,21 @@ void MainWindow::updateTrayTooltip() {
 }
 
 void MainWindow::exportLog() {
-    Logger::instance().flushToFile("manual");
-    NotificationManager::instance().showMessage("日志已导出到 " + ConfigManager::dataDir() + "/Logs");
+    NotificationManager::instance().showMessage("正在导出日志...");
+    QFuture<void> future = QtConcurrent::run([](){
+        Logger::instance().flushToFile("manual");
+    });
+    QFutureWatcher<void>* watcher = new QFutureWatcher<void>(this);
+    connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher](){
+        NotificationManager::instance().showMessage("日志已导出到 " + ConfigManager::dataDir() + "/Logs");
+        watcher->deleteLater();
+    });
+    watcher->setFuture(future);
 }
 
 void MainWindow::applyConfig() {
     auto& cfg = ConfigManager::instance();
-    qDebug() << "Current save dir:" << cfg.saveDir();
+    qDebug() << "当前保存目录:" << cfg.saveDir();
 
     HotkeyManager::instance().updateHotkey(cfg.hotkey(), "screenshot");
     m_replayEnabled = cfg.replayEnabled();
@@ -134,7 +157,10 @@ void MainWindow::applyConfig() {
     }
     NotificationManager::instance().configure(cfg.notificationsEnabled(), cfg.notificationDuration(), cfg.soundEnabled());
 
-    // 更新托盘提示文本
+    // 更新开机自启动菜单项文本（新增）
+    bool autostartEnabled = cfg.autostart();
+    m_autostartToggleAction->setText(autostartEnabled ? "开机自启动: 开" : "开机自启动: 关");
+
     updateTrayTooltip();
 }
 
@@ -149,11 +175,9 @@ void MainWindow::doScreenshot() {
     QPixmap pixmap = screen->grabWindow(0);
     if (pixmap.isNull()) return;
 
-    // 复制到剪贴板（静默，无提示）
     QClipboard* clipboard = QApplication::clipboard();
     clipboard->setPixmap(pixmap);
 
-    // 保存到文件
     QImage image = pixmap.toImage();
     QString dir = ConfigManager::instance().saveDir();
     QDir().mkpath(dir);
@@ -235,7 +259,7 @@ void MainWindow::openLogDir() {
 void MainWindow::runWizard() {
     SetupWizard wizard(this);
     if (wizard.exec() == QDialog::Accepted) {
-        applyConfig();  // 重新应用配置（热键、回放等）
+        applyConfig();
         NotificationManager::instance().showMessage("配置已更新");
     }
 }
@@ -261,7 +285,6 @@ void MainWindow::showAboutDialog() {
 
     QVBoxLayout* mainLayout = new QVBoxLayout(&dialog);
 
-    // 使用 QTextBrowser 支持链接点击
     QTextBrowser* textBrowser = new QTextBrowser();
     textBrowser->setReadOnly(true);
     textBrowser->setFrameStyle(QFrame::NoFrame);
@@ -293,7 +316,6 @@ void MainWindow::showAboutDialog() {
     ).arg(version);
 
     textBrowser->setHtml(htmlContent);
-
     mainLayout->addWidget(textBrowser);
 
     QHBoxLayout* buttonLayout = new QHBoxLayout();
@@ -308,4 +330,9 @@ void MainWindow::showAboutDialog() {
     dialog.move(screenGeometry.center() - dialog.rect().center());
 
     dialog.exec();
+}
+
+void MainWindow::toggleAutostart() {
+    bool current = ConfigManager::instance().autostart();
+    ConfigManager::instance().setAutostart(!current);
 }
