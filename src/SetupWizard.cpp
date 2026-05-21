@@ -18,8 +18,174 @@
 #include <QStandardPaths>
 #include <QGuiApplication>
 #include <QScreen>
+#include <QMouseEvent>
+#include <QKeyEvent>
+#include <QDebug>
 
-// 确认页面类，重写 initializePage 以动态显示配置摘要
+// ================== 支持鼠标按键的热键编辑框（基于 QLineEdit）==================
+class SingleKeySequenceEdit : public QLineEdit {
+    Q_OBJECT
+public:
+    explicit SingleKeySequenceEdit(QWidget *parent = nullptr);
+    void setParentNotification(NotificationManager* mgr) { m_parentNotification = mgr; }
+    void setHotkeyString(const QString& hotkeyStr);
+    QString getHotkeyString() const { return m_currentHotkey; }
+
+signals:
+    void hotkeyStringChanged(const QString& hotkeyStr);
+
+protected:
+    void mousePressEvent(QMouseEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    bool event(QEvent *event) override; // 用于捕获焦点
+
+private:
+    void clearHotkey();
+    void setHotkeyFromButton(int buttonCode, Qt::KeyboardModifiers modifiers);
+    void setHotkeyFromKey(int key, Qt::KeyboardModifiers modifiers);
+    void updateDisplay();
+    void showError(const QString& msg);
+
+    QString m_currentHotkey;
+    bool m_isCapturing = false;
+    NotificationManager* m_parentNotification = nullptr;
+};
+
+SingleKeySequenceEdit::SingleKeySequenceEdit(QWidget *parent) : QLineEdit(parent) {
+    setReadOnly(true);
+    setPlaceholderText(tr("点击后按下键盘或鼠标按键"));
+    setFocusPolicy(Qt::StrongFocus);
+}
+
+void SingleKeySequenceEdit::setHotkeyString(const QString& hotkeyStr) {
+    m_currentHotkey = hotkeyStr;
+    updateDisplay();
+    emit hotkeyStringChanged(m_currentHotkey);
+}
+
+void SingleKeySequenceEdit::mousePressEvent(QMouseEvent *event) {
+    if (!hasFocus()) {
+        setFocus();
+        return;
+    }
+    Qt::MouseButton button = event->button();
+    Qt::KeyboardModifiers mods = event->modifiers();
+    int btnCode = -1;
+    if (button == Qt::LeftButton) btnCode = 0;
+    else if (button == Qt::RightButton) btnCode = 1;
+    else if (button == Qt::MiddleButton) btnCode = 2;
+    else if (button == Qt::XButton1) btnCode = 3;
+    else if (button == Qt::XButton2) btnCode = 4;
+    if (btnCode != -1) {
+        setHotkeyFromButton(btnCode, mods);
+        event->accept();
+    } else {
+        QLineEdit::mousePressEvent(event);
+    }
+}
+
+void SingleKeySequenceEdit::keyPressEvent(QKeyEvent *event) {
+    int key = event->key();
+    if (key == Qt::Key_Backspace || key == Qt::Key_Delete) {
+        clearHotkey();
+        event->accept();
+        return;
+    }
+    Qt::KeyboardModifiers mods = event->modifiers();
+    setHotkeyFromKey(key, mods);
+    event->accept();
+}
+
+bool SingleKeySequenceEdit::event(QEvent *event) {
+    if (event->type() == QEvent::FocusIn) {
+        setPlaceholderText(tr("请按下键盘或鼠标按键..."));
+        setText(QString());
+    } else if (event->type() == QEvent::FocusOut) {
+        setPlaceholderText(tr("点击后按下键盘或鼠标按键"));
+        if (m_currentHotkey.isEmpty()) {
+            setText(QString());
+        } else {
+            updateDisplay();
+        }
+    }
+    return QLineEdit::event(event);
+}
+
+void SingleKeySequenceEdit::clearHotkey() {
+    m_currentHotkey.clear();
+    updateDisplay();
+    emit hotkeyStringChanged(QString());
+}
+
+void SingleKeySequenceEdit::setHotkeyFromButton(int buttonCode, Qt::KeyboardModifiers modifiers) {
+    QString btnName;
+    switch (buttonCode) {
+        case 0: btnName = "MouseLeft"; break;
+        case 1: btnName = "MouseRight"; break;
+        case 2: btnName = "MouseMiddle"; break;
+        case 3: btnName = "MouseX1"; break;
+        case 4: btnName = "MouseX2"; break;
+        default: return;
+    }
+    QString modStr;
+    if (modifiers & Qt::ControlModifier) modStr += "Ctrl+";
+    if (modifiers & Qt::AltModifier)     modStr += "Alt+";
+    if (modifiers & Qt::ShiftModifier)   modStr += "Shift+";
+    if (modifiers & Qt::MetaModifier)    modStr += "Win+";
+    m_currentHotkey = modStr + btnName;
+    updateDisplay();
+    emit hotkeyStringChanged(m_currentHotkey);
+}
+
+void SingleKeySequenceEdit::setHotkeyFromKey(int key, Qt::KeyboardModifiers modifiers) {
+    // 只允许字母、数字、F1-F24、部分特殊键
+    QString keyStr;
+    if (key >= Qt::Key_A && key <= Qt::Key_Z) {
+        keyStr = QChar(key).toUpper();
+    } else if (key >= Qt::Key_0 && key <= Qt::Key_9) {
+        keyStr = QChar(key);
+    } else if (key >= Qt::Key_F1 && key <= Qt::Key_F24) {
+        keyStr = QString("F%1").arg(key - Qt::Key_F1 + 1);
+    } else {
+        static QHash<int, QString> specialMap = {
+            {Qt::Key_Space, "Space"}, {Qt::Key_Return, "Return"}, {Qt::Key_Enter, "Enter"},
+            {Qt::Key_Tab, "Tab"}, {Qt::Key_Escape, "Escape"}, {Qt::Key_Backspace, "Backspace"},
+            {Qt::Key_Delete, "Delete"}, {Qt::Key_Insert, "Insert"},
+            {Qt::Key_Home, "Home"}, {Qt::Key_End, "End"},
+            {Qt::Key_PageUp, "PageUp"}, {Qt::Key_PageDown, "PageDown"},
+            {Qt::Key_Up, "Up"}, {Qt::Key_Down, "Down"}, {Qt::Key_Left, "Left"}, {Qt::Key_Right, "Right"},
+            {Qt::Key_Print, "PrintScreen"}, {Qt::Key_ScrollLock, "ScrollLock"}, {Qt::Key_Pause, "Pause"},
+            {Qt::Key_CapsLock, "CapsLock"}, {Qt::Key_NumLock, "NumLock"}
+        };
+        if (specialMap.contains(key)) {
+            keyStr = specialMap[key];
+        } else {
+            showError(tr("不支持的按键: %1").arg(QKeySequence(key).toString()));
+            return;
+        }
+    }
+    QString modStr;
+    if (modifiers & Qt::ControlModifier) modStr += "Ctrl+";
+    if (modifiers & Qt::AltModifier)     modStr += "Alt+";
+    if (modifiers & Qt::ShiftModifier)   modStr += "Shift+";
+    if (modifiers & Qt::MetaModifier)    modStr += "Win+";
+    m_currentHotkey = modStr + keyStr;
+    updateDisplay();
+    emit hotkeyStringChanged(m_currentHotkey);
+}
+
+void SingleKeySequenceEdit::updateDisplay() {
+    setText(m_currentHotkey);
+}
+
+void SingleKeySequenceEdit::showError(const QString &msg) {
+    if (m_parentNotification)
+        m_parentNotification->showMessage(msg);
+    else
+        qWarning() << msg;
+}
+
+// ================== 确认页面类 ==================
 class ConfirmPage : public QWizardPage {
 public:
     ConfirmPage(SetupWizard* wizard, QTextEdit* textEdit)
@@ -32,10 +198,9 @@ public:
     }
 
     void initializePage() override {
-        // 收集当前所有控件的值到临时配置
         auto& temp = m_wizard->m_tempConfig;
-        temp["hotkey"] = m_wizard->m_hotkeyEdit->keySequence().toString(QKeySequence::NativeText);
-        temp["replay_hotkey"] = m_wizard->m_replayHotkeyEdit->keySequence().toString(QKeySequence::NativeText);
+        temp["hotkey"] = m_wizard->m_hotkeyEdit->getHotkeyString();
+        temp["replay_hotkey"] = m_wizard->m_replayHotkeyEdit->getHotkeyString();
         temp["save_dir"] = m_wizard->m_dirEdit->text();
         QString quality = m_wizard->m_qualityCombo->currentText();
         int qualityVal = (quality == tr("高") ? 2 : (quality == tr("中") ? 1 : 0));
@@ -87,20 +252,19 @@ private:
     QTextEdit* m_textEdit;
 };
 
-SetupWizard::SetupWizard(QWidget *parent) : QWizard(parent)
-{
+// ================== SetupWizard 实现 ==================
+SetupWizard::SetupWizard(QWidget *parent) : QWizard(parent) {
     setWindowTitle(tr("Flashshot 设置向导"));
-    setWizardStyle(ClassicStyle);   // 经典风格，不显示侧边栏
+    setWizardStyle(ClassicStyle);
     setOption(HaveHelpButton, false);
     setMinimumSize(600, 500);
     resize(640, 520);
 
     initPages();
 
-    // 加载当前配置并预填充
     auto& cfg = ConfigManager::instance();
-    m_hotkeyEdit->setKeySequence(QKeySequence(cfg.hotkey()));
-    m_replayHotkeyEdit->setKeySequence(QKeySequence(cfg.replayHotkey()));
+    m_hotkeyEdit->setHotkeyString(cfg.hotkey());
+    m_replayHotkeyEdit->setHotkeyString(cfg.replayHotkey());
     m_dirEdit->setText(cfg.saveDir());
     int quality = cfg.quality();
     m_qualityCombo->setCurrentIndex(quality == 2 ? 0 : (quality == 1 ? 1 : 2));
@@ -118,13 +282,11 @@ SetupWizard::SetupWizard(QWidget *parent) : QWizard(parent)
     int durIdx = (durMs == 500 ? 0 : (durMs == 1000 ? 1 : (durMs == 1500 ? 2 : 3)));
     m_durationCombo->setCurrentIndex(durIdx);
 
-    // 将窗口居中于主屏幕
     QRect screenGeometry = QGuiApplication::primaryScreen()->availableGeometry();
     move(screenGeometry.center() - rect().center());
 }
 
-void SetupWizard::initPages()
-{
+void SetupWizard::initPages() {
     setPage(0, createHotkeyPage());
     setPage(1, createDirPage());
     setPage(2, createQualityPage());
@@ -132,29 +294,26 @@ void SetupWizard::initPages()
     setPage(4, createNotificationPage());
     setPage(5, createOtherPage());
     setPage(6, createConfirmPage());
-
     setStartId(0);
 }
 
-QWizardPage* SetupWizard::createHotkeyPage()
-{
+QWizardPage* SetupWizard::createHotkeyPage() {
     QWizardPage* page = new QWizardPage;
     page->setTitle(tr("快捷键设置"));
     QVBoxLayout* layout = new QVBoxLayout(page);
 
     layout->addWidget(new QLabel(tr("普通截图快捷键:")));
-    m_hotkeyEdit = new QKeySequenceEdit(QKeySequence("F12"));
+    m_hotkeyEdit = new SingleKeySequenceEdit();
     layout->addWidget(m_hotkeyEdit);
 
-    QLabel* tip = new QLabel(tr("提示：支持字母、数字、F1-F12等键，可配合Ctrl/Alt/Shift/Win组合"));
+    QLabel* tip = new QLabel(tr("提示：支持字母、数字、F1-F12、鼠标左中右键、侧键等，可配合Ctrl/Alt/Shift/Win组合"));
     tip->setStyleSheet("color: gray; font-size: 11px;");
     layout->addWidget(tip);
     layout->addStretch();
     return page;
 }
 
-QWizardPage* SetupWizard::createDirPage()
-{
+QWizardPage* SetupWizard::createDirPage() {
     QWizardPage* page = new QWizardPage;
     page->setTitle(tr("保存目录"));
     QVBoxLayout* layout = new QVBoxLayout(page);
@@ -177,8 +336,7 @@ QWizardPage* SetupWizard::createDirPage()
     return page;
 }
 
-QWizardPage* SetupWizard::createQualityPage()
-{
+QWizardPage* SetupWizard::createQualityPage() {
     QWizardPage* page = new QWizardPage;
     page->setTitle(tr("图片质量"));
     QVBoxLayout* layout = new QVBoxLayout(page);
@@ -190,8 +348,7 @@ QWizardPage* SetupWizard::createQualityPage()
     return page;
 }
 
-QWizardPage* SetupWizard::createReplayPage()
-{
+QWizardPage* SetupWizard::createReplayPage() {
     QWizardPage* page = new QWizardPage;
     page->setTitle(tr("回放截屏设置"));
     QVBoxLayout* layout = new QVBoxLayout(page);
@@ -234,24 +391,23 @@ QWizardPage* SetupWizard::createReplayPage()
     layout->addWidget(gb);
 
     layout->addWidget(new QLabel(tr("回放截屏快捷键:")));
-    m_replayHotkeyEdit = new QKeySequenceEdit(QKeySequence("Ctrl+Shift+PageUp"));
+    m_replayHotkeyEdit = new SingleKeySequenceEdit();
     layout->addWidget(m_replayHotkeyEdit);
 
-    QLabel* tip = new QLabel(tr("提示：支持字母、数字、F1-F12等键，可配合Ctrl/Alt/Shift/Win组合"));
+    QLabel* tip = new QLabel(tr("提示：支持字母、数字、F1-F12、鼠标左中右键、侧键等，可配合Ctrl/Alt/Shift/Win组合"));
     tip->setStyleSheet("color: gray; font-size: 11px;");
     layout->addWidget(tip);
 
     connect(m_replayEnableCheck, &QCheckBox::toggled, m_replayDurationSpin, &QSpinBox::setEnabled);
     connect(m_replayEnableCheck, &QCheckBox::toggled, m_replayIntervalSpin, &QSpinBox::setEnabled);
     connect(m_replayEnableCheck, &QCheckBox::toggled, m_replayScaleCombo, &QComboBox::setEnabled);
-    connect(m_replayEnableCheck, &QCheckBox::toggled, m_replayHotkeyEdit, &QKeySequenceEdit::setEnabled);
+    connect(m_replayEnableCheck, &QCheckBox::toggled, m_replayHotkeyEdit, &SingleKeySequenceEdit::setEnabled);
 
     layout->addStretch();
     return page;
 }
 
-QWizardPage* SetupWizard::createNotificationPage()
-{
+QWizardPage* SetupWizard::createNotificationPage() {
     QWizardPage* page = new QWizardPage;
     page->setTitle(tr("通知设置"));
     QVBoxLayout* layout = new QVBoxLayout(page);
@@ -277,8 +433,7 @@ QWizardPage* SetupWizard::createNotificationPage()
     return page;
 }
 
-QWizardPage* SetupWizard::createOtherPage()
-{
+QWizardPage* SetupWizard::createOtherPage() {
     QWizardPage* page = new QWizardPage;
     page->setTitle(tr("其他选项"));
     QVBoxLayout* layout = new QVBoxLayout(page);
@@ -290,15 +445,13 @@ QWizardPage* SetupWizard::createOtherPage()
     return page;
 }
 
-QWizardPage* SetupWizard::createConfirmPage()
-{
+QWizardPage* SetupWizard::createConfirmPage() {
     QTextEdit* textEdit = new QTextEdit;
     textEdit->setReadOnly(true);
     return new ConfirmPage(this, textEdit);
 }
 
-void SetupWizard::accept()
-{
+void SetupWizard::accept() {
     auto& cfg = ConfigManager::instance();
 
     cfg.setHotkey(m_tempConfig["hotkey"].toString());
@@ -318,3 +471,5 @@ void SetupWizard::accept()
 
     QWizard::accept();
 }
+
+#include "SetupWizard.moc"

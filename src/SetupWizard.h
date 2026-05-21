@@ -9,7 +9,8 @@ class QComboBox;
 class QCheckBox;
 class QSpinBox;
 class QKeySequenceEdit;
-class ConfirmPage;  // 前置声明
+class ConfirmPage;
+class SingleKeySequenceEdit;   // 前置声明
 
 class SetupWizard : public QWizard
 {
@@ -18,7 +19,7 @@ public:
     explicit SetupWizard(QWidget *parent = nullptr);
     void accept() override;
 
-    friend class ConfirmPage;  // 允许 ConfirmPage 访问私有控件
+    friend class ConfirmPage;
 
 private:
     void initPages();
@@ -30,9 +31,8 @@ private:
     QWizardPage* createOtherPage();
     QWizardPage* createConfirmPage();
 
-    // 页面控件（现在即使 private 也可被 ConfirmPage 访问）
-    QKeySequenceEdit* m_hotkeyEdit = nullptr;
-    QKeySequenceEdit* m_replayHotkeyEdit = nullptr;
+    SingleKeySequenceEdit* m_hotkeyEdit = nullptr;
+    SingleKeySequenceEdit* m_replayHotkeyEdit = nullptr;
     QLineEdit* m_dirEdit = nullptr;
     QComboBox* m_qualityCombo = nullptr;
     QCheckBox* m_replayEnableCheck = nullptr;
